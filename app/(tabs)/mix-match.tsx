@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,34 +13,86 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Shuffle, Save, ArrowLeft, User, Heart } from 'lucide-react-native';
 import { router } from 'expo-router';
+import { useAuth } from '@/context/AuthContext';
+import { DatabaseService } from '@/services/database';
+import { WardrobeItem } from '@/types/database';
 
 export default function MixMatchScreen() {
-  const [selectedOutfit, setSelectedOutfit] = useState({
-    top: 'https://images.pexels.com/photos/7679720/pexels-photo-7679720.jpeg?auto=compress&cs=tinysrgb&w=300',
-    bottom: 'https://images.pexels.com/photos/1598505/pexels-photo-1598505.jpeg?auto=compress&cs=tinysrgb&w=300',
-    accessory: 'https://images.pexels.com/photos/1191531/pexels-photo-1191531.jpeg?auto=compress&cs=tinysrgb&w=300',
+  const { user } = useAuth();
+  const [selectedOutfit, setSelectedOutfit] = useState<{
+    top: WardrobeItem | null;
+    bottom: WardrobeItem | null;
+    accessory: WardrobeItem | null;
+  }>({
+    top: null,
+    bottom: null,
+    accessory: null,
   });
 
-  const wardrobeItems = {
-    tops: [
-      'https://images.pexels.com/photos/7679720/pexels-photo-7679720.jpeg?auto=compress&cs=tinysrgb&w=200',
-      'https://images.pexels.com/photos/1536619/pexels-photo-1536619.jpeg?auto=compress&cs=tinysrgb&w=200',
-      'https://images.pexels.com/photos/1149601/pexels-photo-1149601.jpeg?auto=compress&cs=tinysrgb&w=200',
-    ],
-    bottoms: [
-      'https://images.pexels.com/photos/1598505/pexels-photo-1598505.jpeg?auto=compress&cs=tinysrgb&w=200',
-      'https://images.pexels.com/photos/1464625/pexels-photo-1464625.jpeg?auto=compress&cs=tinysrgb&w=200',
-    ],
-    accessories: [
-      'https://images.pexels.com/photos/1191531/pexels-photo-1191531.jpeg?auto=compress&cs=tinysrgb&w=200',
-      'https://images.pexels.com/photos/2529148/pexels-photo-2529148.jpeg?auto=compress&cs=tinysrgb&w=200',
-    ],
+  const [wardrobeItems, setWardrobeItems] = useState<{
+    tops: WardrobeItem[];
+    bottoms: WardrobeItem[];
+    accessories: WardrobeItem[];
+    shoes: WardrobeItem[];
+    outerwear: WardrobeItem[];
+  }>({
+    tops: [],
+    bottoms: [],
+    accessories: [],
+    shoes: [],
+    outerwear: [],
+  });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      loadWardrobeItems();
+    }
+  }, [user]);
+
+  const loadWardrobeItems = async () => {
+    if (!user) return;
+    
+    setLoading(true);
+    try {
+      const [tops, bottoms, accessories, shoes, outerwear] = await Promise.all([
+        DatabaseService.getWardrobeItems(user.id, 'TOPS'),
+        DatabaseService.getWardrobeItems(user.id, 'BOTTOMS'),
+        DatabaseService.getWardrobeItems(user.id, 'ACCESSORIES'),
+        DatabaseService.getWardrobeItems(user.id, 'SHOES'),
+        DatabaseService.getWardrobeItems(user.id, 'OUTERWEAR'),
+      ]);
+      
+      setWardrobeItems({ tops, bottoms, accessories, shoes, outerwear });
+      
+      // Auto-select first items if available
+      if (tops.length > 0 && !selectedOutfit.top) {
+        setSelectedOutfit(prev => ({ ...prev, top: tops[0] }));
+      }
+      if (bottoms.length > 0 && !selectedOutfit.bottom) {
+        setSelectedOutfit(prev => ({ ...prev, bottom: bottoms[0] }));
+      }
+      if (accessories.length > 0 && !selectedOutfit.accessory) {
+        setSelectedOutfit(prev => ({ ...prev, accessory: accessories[0] }));
+      }
+    } catch (error) {
+      console.error('Error loading wardrobe items:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const randomizeOutfit = () => {
-    const randomTop = wardrobeItems.tops[Math.floor(Math.random() * wardrobeItems.tops.length)];
-    const randomBottom = wardrobeItems.bottoms[Math.floor(Math.random() * wardrobeItems.bottoms.length)];
-    const randomAccessory = wardrobeItems.accessories[Math.floor(Math.random() * wardrobeItems.accessories.length)];
+    const randomTop = wardrobeItems.tops.length > 0 
+      ? wardrobeItems.tops[Math.floor(Math.random() * wardrobeItems.tops.length)]
+      : null;
+    const randomBottom = wardrobeItems.bottoms.length > 0
+      ? wardrobeItems.bottoms[Math.floor(Math.random() * wardrobeItems.bottoms.length)]
+      : null;
+    const randomAccessory = wardrobeItems.accessories.length > 0
+      ? wardrobeItems.accessories[Math.floor(Math.random() * wardrobeItems.accessories.length)]
+      : null;
 
     setSelectedOutfit({
       top: randomTop,
@@ -48,12 +101,73 @@ export default function MixMatchScreen() {
     });
   };
 
-  const saveLook = () => {
-    Alert.alert('Success', 'Look saved to your lookbook!', [
-      { text: 'View Lookbook', onPress: () => router.push('/wardrobe') },
-      { text: 'OK' },
-    ]);
+  const saveLook = async () => {
+    if (!user || (!selectedOutfit.top && !selectedOutfit.bottom && !selectedOutfit.accessory)) {
+      Alert.alert('Error', 'Please select at least one item for your outfit');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      // Create outfit
+      const outfit = await DatabaseService.createOutfit({
+        user_id: user.id,
+        name: `Look ${new Date().toLocaleDateString()}`,
+        description: 'Created with Mix & Match',
+        occasion: '',
+        season: '',
+        is_public: false,
+      });
+
+      if (!outfit) {
+        Alert.alert('Error', 'Failed to save outfit');
+        return;
+      }
+
+      // Add outfit items
+      const promises = [];
+      if (selectedOutfit.top) {
+        promises.push(DatabaseService.addOutfitItem({
+          outfit_id: outfit.id,
+          wardrobe_item_id: selectedOutfit.top.id,
+          position_type: 'TOP',
+        }));
+      }
+      if (selectedOutfit.bottom) {
+        promises.push(DatabaseService.addOutfitItem({
+          outfit_id: outfit.id,
+          wardrobe_item_id: selectedOutfit.bottom.id,
+          position_type: 'BOTTOM',
+        }));
+      }
+      if (selectedOutfit.accessory) {
+        promises.push(DatabaseService.addOutfitItem({
+          outfit_id: outfit.id,
+          wardrobe_item_id: selectedOutfit.accessory.id,
+          position_type: 'ACCESSORY',
+        }));
+      }
+
+      await Promise.all(promises);
+
+      Alert.alert('Success', 'Look saved to your lookbook!', [
+        { text: 'View Lookbook', onPress: () => router.push('/wardrobe') },
+        { text: 'OK' },
+      ]);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to save outfit');
+    } finally {
+      setSaving(false);
+    }
   };
+
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.centered]}>
+        <Text style={styles.loadingText}>Loading your wardrobe...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -88,15 +202,33 @@ export default function MixMatchScreen() {
           <Text style={styles.sectionTitle}>Current Look</Text>
           <View style={styles.outfitGrid}>
             <View style={styles.outfitItem}>
-              <Image source={{ uri: selectedOutfit.top }} style={styles.outfitImage} />
+              {selectedOutfit.top ? (
+                <Image source={{ uri: selectedOutfit.top.image_url }} style={styles.outfitImage} />
+              ) : (
+                <View style={styles.emptySlot}>
+                  <Text style={styles.emptySlotText}>No Top</Text>
+                </View>
+              )}
               <Text style={styles.outfitLabel}>Top</Text>
             </View>
             <View style={styles.outfitItem}>
-              <Image source={{ uri: selectedOutfit.bottom }} style={styles.outfitImage} />
+              {selectedOutfit.bottom ? (
+                <Image source={{ uri: selectedOutfit.bottom.image_url }} style={styles.outfitImage} />
+              ) : (
+                <View style={styles.emptySlot}>
+                  <Text style={styles.emptySlotText}>No Bottom</Text>
+                </View>
+              )}
               <Text style={styles.outfitLabel}>Bottom</Text>
             </View>
             <View style={styles.outfitItem}>
-              <Image source={{ uri: selectedOutfit.accessory }} style={styles.outfitImage} />
+              {selectedOutfit.accessory ? (
+                <Image source={{ uri: selectedOutfit.accessory.image_url }} style={styles.outfitImage} />
+              ) : (
+                <View style={styles.emptySlot}>
+                  <Text style={styles.emptySlotText}>No Accessory</Text>
+                </View>
+              )}
               <Text style={styles.outfitLabel}>Accessory</Text>
             </View>
           </View>
@@ -104,7 +236,11 @@ export default function MixMatchScreen() {
 
         {/* Action Buttons */}
         <View style={styles.actionButtons}>
-          <TouchableOpacity style={styles.randomizeButton} onPress={randomizeOutfit}>
+          <TouchableOpacity 
+            style={styles.randomizeButton} 
+            onPress={randomizeOutfit}
+            disabled={loading}
+          >
             <LinearGradient
               colors={['#FBBF24', '#F59E0B']}
               style={styles.gradientButton}
@@ -114,9 +250,15 @@ export default function MixMatchScreen() {
             </LinearGradient>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.saveButton} onPress={saveLook}>
+          <TouchableOpacity 
+            style={[styles.saveButton, saving && styles.disabledButton]} 
+            onPress={saveLook}
+            disabled={saving}
+          >
             <Save size={20} color="#10B981" />
-            <Text style={styles.saveText}>Save Look</Text>
+            <Text style={styles.saveText}>
+              {saving ? 'Saving...' : 'Save Look'}
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -134,9 +276,17 @@ export default function MixMatchScreen() {
                   style={styles.carouselItem}
                   onPress={() => setSelectedOutfit(prev => ({ ...prev, top: item }))}
                 >
-                  <Image source={{ uri: item }} style={styles.carouselImage} />
+                  <Image source={{ uri: item.image_url }} style={styles.carouselImage} />
                 </TouchableOpacity>
               ))}
+              {wardrobeItems.tops.length === 0 && (
+                <TouchableOpacity 
+                  style={styles.emptyCategory}
+                  onPress={() => router.push('/upload')}
+                >
+                  <Text style={styles.emptyCategoryText}>Add tops</Text>
+                </TouchableOpacity>
+              )}
             </ScrollView>
           </View>
 
@@ -150,9 +300,17 @@ export default function MixMatchScreen() {
                   style={styles.carouselItem}
                   onPress={() => setSelectedOutfit(prev => ({ ...prev, bottom: item }))}
                 >
-                  <Image source={{ uri: item }} style={styles.carouselImage} />
+                  <Image source={{ uri: item.image_url }} style={styles.carouselImage} />
                 </TouchableOpacity>
               ))}
+              {wardrobeItems.bottoms.length === 0 && (
+                <TouchableOpacity 
+                  style={styles.emptyCategory}
+                  onPress={() => router.push('/upload')}
+                >
+                  <Text style={styles.emptyCategoryText}>Add bottoms</Text>
+                </TouchableOpacity>
+              )}
             </ScrollView>
           </View>
 
@@ -166,9 +324,17 @@ export default function MixMatchScreen() {
                   style={styles.carouselItem}
                   onPress={() => setSelectedOutfit(prev => ({ ...prev, accessory: item }))}
                 >
-                  <Image source={{ uri: item }} style={styles.carouselImage} />
+                  <Image source={{ uri: item.image_url }} style={styles.carouselImage} />
                 </TouchableOpacity>
               ))}
+              {wardrobeItems.accessories.length === 0 && (
+                <TouchableOpacity 
+                  style={styles.emptyCategory}
+                  onPress={() => router.push('/upload')}
+                >
+                  <Text style={styles.emptyCategoryText}>Add accessories</Text>
+                </TouchableOpacity>
+              )}
             </ScrollView>
           </View>
         </View>
@@ -182,6 +348,14 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F8FAFC',
+  },
+  centered: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#6B7280',
   },
   safeArea: {
     flex: 1,
@@ -266,6 +440,23 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginBottom: 8,
   },
+  emptySlot: {
+    width: 80,
+    height: 80,
+    borderRadius: 12,
+    backgroundColor: '#F1F5F9',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+    borderStyle: 'dashed',
+  },
+  emptySlotText: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    textAlign: 'center',
+  },
   outfitLabel: {
     fontSize: 14,
     fontWeight: '600',
@@ -279,6 +470,9 @@ const styles = StyleSheet.create({
   randomizeButton: {
     borderRadius: 20,
     overflow: 'hidden',
+  },
+  disabledButton: {
+    opacity: 0.7,
   },
   gradientButton: {
     flexDirection: 'row',
@@ -342,5 +536,22 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 8,
+  },
+  emptyCategory: {
+    width: 80,
+    height: 80,
+    backgroundColor: '#F1F5F9',
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+    borderStyle: 'dashed',
+    marginRight: 12,
+  },
+  emptyCategoryText: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    textAlign: 'center',
   },
 });

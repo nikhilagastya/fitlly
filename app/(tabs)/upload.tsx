@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,22 +14,81 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Plus, Camera, Image as ImageIcon, ArrowLeft } from 'lucide-react-native';
 import { router } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+import { useAuth } from '@/context/AuthContext';
+import { DatabaseService } from '@/services/database';
+import { WardrobeItem } from '@/types/database';
 
 export default function UploadScreen() {
+  const { user } = useAuth();
   const [selectedCategory, setSelectedCategory] = useState('TOPS');
-  const [uploadedItems, setUploadedItems] = useState({
-    TOPS: [
-      { id: 1, image: 'https://images.pexels.com/photos/7679720/pexels-photo-7679720.jpeg?auto=compress&cs=tinysrgb&w=200' },
-      { id: 2, image: 'https://images.pexels.com/photos/1536619/pexels-photo-1536619.jpeg?auto=compress&cs=tinysrgb&w=200' },
-    ],
-    BOTTOMS: [
-      { id: 3, image: 'https://images.pexels.com/photos/1598505/pexels-photo-1598505.jpeg?auto=compress&cs=tinysrgb&w=200' },
-    ],
-    ACCESSORIES: [
-      { id: 4, image: 'https://images.pexels.com/photos/1191531/pexels-photo-1191531.jpeg?auto=compress&cs=tinysrgb&w=200' },
-    ],
-  });
+  const [wardrobeItems, setWardrobeItems] = useState<WardrobeItem[]>([]);
+  const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    if (user) {
+      loadWardrobeItems();
+    }
+  }, [user, selectedCategory]);
+
+  const loadWardrobeItems = async () => {
+    if (!user) return;
+    
+    try {
+      const items = await DatabaseService.getWardrobeItems(user.id, selectedCategory);
+      setWardrobeItems(items);
+    } catch (error) {
+      console.error('Error loading wardrobe items:', error);
+    }
+  };
+
+  const uploadImageToSupabase = async (uri: string): Promise<string | null> => {
+    try {
+      // For demo purposes, we'll use the original URI
+      // In a real app, you'd upload to Supabase Storage
+      return uri;
+    } catch (error) {
+      console.error('Error uploading image:', error);
+      return null;
+    }
+  };
+
+  const saveWardrobeItem = async (imageUri: string) => {
+    if (!user) return;
+
+    setLoading(true);
+    try {
+      const imageUrl = await uploadImageToSupabase(imageUri);
+      if (!imageUrl) {
+        Alert.alert('Error', 'Failed to upload image');
+        return;
+      }
+
+      const newItem: Omit<WardrobeItem, 'id' | 'created_at' | 'updated_at'> = {
+        user_id: user.id,
+        name: `New ${selectedCategory.toLowerCase()}`,
+        category: selectedCategory as any,
+        subcategory: '',
+        color: '',
+        brand: '',
+        image_url: imageUrl,
+        image_path: '',
+        tags: [],
+        is_favorite: false,
+      };
+
+      const savedItem = await DatabaseService.addWardrobeItem(newItem);
+      if (savedItem) {
+        Alert.alert('Success', 'Item added to your wardrobe!');
+        loadWardrobeItems();
+      } else {
+        Alert.alert('Error', 'Failed to save item');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to save item');
+    } finally {
+      setLoading(false);
+    }
+  };
   const handleCameraUpload = async () => {
     try {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
@@ -44,15 +104,7 @@ export default function UploadScreen() {
       });
 
       if (!result.canceled) {
-        const newItem = {
-          id: Date.now(),
-          image: result.assets[0].uri,
-        };
-        setUploadedItems(prev => ({
-          ...prev,
-          [selectedCategory]: [...prev[selectedCategory], newItem],
-        }));
-        Alert.alert('Success', 'Photo uploaded successfully!');
+        await saveWardrobeItem(result.assets[0].uri);
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to take photo');
@@ -75,15 +127,7 @@ export default function UploadScreen() {
       });
 
       if (!result.canceled) {
-        const newItem = {
-          id: Date.now(),
-          image: result.assets[0].uri,
-        };
-        setUploadedItems(prev => ({
-          ...prev,
-          [selectedCategory]: [...prev[selectedCategory], newItem],
-        }));
-        Alert.alert('Success', 'Image uploaded successfully!');
+        await saveWardrobeItem(result.assets[0].uri);
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to upload image');
@@ -102,17 +146,34 @@ export default function UploadScreen() {
     );
   };
 
-  const removeItem = (itemId) => {
-    setUploadedItems(prev => ({
-      ...prev,
-      [selectedCategory]: prev[selectedCategory].filter(item => item.id !== itemId),
-    }));
+  const removeItem = async (itemId: string) => {
+    Alert.alert(
+      'Delete Item',
+      'Are you sure you want to delete this item?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Delete', 
+          style: 'destructive',
+          onPress: async () => {
+            const success = await DatabaseService.deleteWardrobeItem(itemId);
+            if (success) {
+              loadWardrobeItems();
+            } else {
+              Alert.alert('Error', 'Failed to delete item');
+            }
+          }
+        },
+      ]
+    );
   };
 
   const categories = [
     { id: 'TOPS', name: 'TOPS', color: '#FF6B9D', bgColor: '#FEE2E2' },
     { id: 'BOTTOMS', name: 'BOTTOMS', color: '#0EA5E9', bgColor: '#E0F2FE' },
     { id: 'ACCESSORIES', name: 'ACCESSORIES', color: '#10B981', bgColor: '#D1FAE5' },
+    { id: 'SHOES', name: 'SHOES', color: '#8B5CF6', bgColor: '#F3E8FF' },
+    { id: 'OUTERWEAR', name: 'OUTERWEAR', color: '#F59E0B', bgColor: '#FEF3C7' },
   ];
 
   return (
@@ -196,15 +257,16 @@ export default function UploadScreen() {
         {/* Preview Grid */}
         <View style={styles.previewSection}>
           <Text style={styles.sectionTitle}>
-            {selectedCategory} ({uploadedItems[selectedCategory].length})
+            {selectedCategory} ({wardrobeItems.length})
           </Text>
           <View style={styles.previewGrid}>
-            {uploadedItems[selectedCategory].map((item) => (
+            {wardrobeItems.map((item) => (
               <View key={item.id} style={styles.previewItem}>
-                <Image source={{ uri: item.image }} style={styles.previewImage} />
+                <Image source={{ uri: item.image_url }} style={styles.previewImage} />
                 <TouchableOpacity 
                   style={styles.deleteButton}
                   onPress={() => removeItem(item.id)}
+                  disabled={loading}
                 >
                   <Text style={styles.deleteButtonText}>×</Text>
                 </TouchableOpacity>
@@ -212,9 +274,15 @@ export default function UploadScreen() {
             ))}
             
             {/* Add More Button */}
-            <TouchableOpacity style={styles.addMoreButton} onPress={handleCategoryUpload}>
+            <TouchableOpacity 
+              style={styles.addMoreButton} 
+              onPress={handleCategoryUpload}
+              disabled={loading}
+            >
               <Plus size={32} color="#9CA3AF" />
-              <Text style={styles.addMoreText}>Add More</Text>
+              <Text style={styles.addMoreText}>
+                {loading ? 'Uploading...' : 'Add More'}
+              </Text>
             </TouchableOpacity>
           </View>
         </View>

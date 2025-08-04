@@ -1,4 +1,5 @@
 import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,8 +14,41 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Shuffle, Plus, Shirt, Heart, Bell, User } from 'lucide-react-native';
 import { router } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+import { useAuth } from '@/context/AuthContext';
+import { DatabaseService } from '@/services/database';
+import { WardrobeItem, Outfit } from '@/types/database';
 
 export default function HomeScreen() {
+  const { user, profile } = useAuth();
+  const [wardrobeItems, setWardrobeItems] = useState<WardrobeItem[]>([]);
+  const [recentOutfits, setRecentOutfits] = useState<Outfit[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (user) {
+      loadData();
+    }
+  }, [user]);
+
+  const loadData = async () => {
+    if (!user) return;
+    
+    setLoading(true);
+    try {
+      const [items, outfits] = await Promise.all([
+        DatabaseService.getWardrobeItems(user.id),
+        DatabaseService.getUserOutfits(user.id),
+      ]);
+      
+      setWardrobeItems(items.slice(0, 4)); // Show only first 4 items
+      setRecentOutfits(outfits.slice(0, 2)); // Show only first 2 outfits
+    } catch (error) {
+      console.error('Error loading data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleUploadImage = async () => {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -31,55 +65,20 @@ export default function HomeScreen() {
       });
 
       if (!result.canceled) {
-        Alert.alert('Success', 'Image uploaded successfully!');
-        // Here you would typically save the image to your state or backend
+        router.push('/upload');
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to upload image');
     }
   };
 
-  const wardrobeItems = [
-    {
-      id: 1,
-      name: 'Pink Crop Top',
-      category: 'Casual • Summer',
-      image: 'https://images.pexels.com/photos/7679720/pexels-photo-7679720.jpeg?auto=compress&cs=tinysrgb&w=400',
-    },
-    {
-      id: 2,
-      name: 'Blue Jeans',
-      category: 'Casual • All seasons',
-      image: 'https://images.pexels.com/photos/1598505/pexels-photo-1598505.jpeg?auto=compress&cs=tinysrgb&w=400',
-    },
-    {
-      id: 3,
-      name: 'White Sneakers',
-      category: 'Footwear • Sport',
-      image: 'https://images.pexels.com/photos/2529148/pexels-photo-2529148.jpeg?auto=compress&cs=tinysrgb&w=400',
-    },
-    {
-      id: 4,
-      name: 'Gold Chain',
-      category: 'Accessory • Trendy',
-      image: 'https://images.pexels.com/photos/1191531/pexels-photo-1191531.jpeg?auto=compress&cs=tinysrgb&w=400',
-    },
-  ];
-
-  const recentLooks = [
-    {
-      id: 1,
-      name: 'Casual Day',
-      likes: 4,
-      image: 'https://images.pexels.com/photos/7679720/pexels-photo-7679720.jpeg?auto=compress&cs=tinysrgb&w=300',
-    },
-    {
-      id: 2,
-      name: 'Date Night',
-      likes: 18,
-      image: 'https://images.pexels.com/photos/1536619/pexels-photo-1536619.jpeg?auto=compress&cs=tinysrgb&w=300',
-    },
-  ];
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.centered]}>
+        <Text style={styles.loadingText}>Loading your wardrobe...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -112,7 +111,7 @@ export default function HomeScreen() {
           end={{ x: 1, y: 1 }}
           style={styles.mainCard}
         >
-          <Text style={styles.greeting}>Hey Sarah! ✨</Text>
+          <Text style={styles.greeting}>Hey {profile?.full_name || 'Stylist'}! ✨</Text>
           <Text style={styles.subGreeting}>
             Ready to create some amazing looks today?
           </Text>
@@ -171,11 +170,19 @@ export default function HomeScreen() {
           <View style={styles.wardrobeGrid}>
             {wardrobeItems.map((item) => (
               <View key={item.id} style={styles.wardrobeItem}>
-                <Image source={{ uri: item.image }} style={styles.itemImage} />
+                <Image source={{ uri: item.image_url }} style={styles.itemImage} />
                 <Text style={styles.itemName}>{item.name}</Text>
-                <Text style={styles.itemCategory}>{item.category}</Text>
+                <Text style={styles.itemCategory}>{item.category} • {item.subcategory || 'General'}</Text>
               </View>
             ))}
+            {wardrobeItems.length === 0 && (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyText}>No items yet</Text>
+                <TouchableOpacity onPress={() => router.push('/upload')}>
+                  <Text style={styles.emptyLink}>Add your first item</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </View>
 
@@ -189,16 +196,27 @@ export default function HomeScreen() {
           </View>
 
           <View style={styles.looksGrid}>
-            {recentLooks.map((look) => (
-              <View key={look.id} style={styles.lookCard}>
-                <Image source={{ uri: look.image }} style={styles.lookImage} />
-                <Text style={styles.lookName}>{look.name}</Text>
+            {recentOutfits.map((outfit) => (
+              <View key={outfit.id} style={styles.lookCard}>
+                <Image 
+                  source={{ uri: 'https://images.pexels.com/photos/7679720/pexels-photo-7679720.jpeg?auto=compress&cs=tinysrgb&w=300' }} 
+                  style={styles.lookImage} 
+                />
+                <Text style={styles.lookName}>{outfit.name}</Text>
                 <View style={styles.lookStats}>
                   <Heart size={16} color="#FF6B9D" fill="#FF6B9D" />
-                  <Text style={styles.likesText}>{look.likes}</Text>
+                  <Text style={styles.likesText}>{outfit.likes_count}</Text>
                 </View>
               </View>
             ))}
+            {recentOutfits.length === 0 && (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyText}>No outfits yet</Text>
+                <TouchableOpacity onPress={() => router.push('/mix-match')}>
+                  <Text style={styles.emptyLink}>Create your first look</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </View>
       </ScrollView>
@@ -211,6 +229,14 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F8FAFC',
+  },
+  centered: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#6B7280',
   },
   safeArea: {
     flex: 1,
@@ -443,6 +469,22 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   likesText: {
+    fontSize: 14,
+    color: '#FF6B9D',
+    fontWeight: '600',
+  },
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#6B7280',
+    marginBottom: 8,
+  },
+  emptyLink: {
     fontSize: 14,
     color: '#FF6B9D',
     fontWeight: '600',

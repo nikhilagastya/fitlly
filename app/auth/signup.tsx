@@ -41,10 +41,9 @@ export default function SignUpScreen() {
       Alert.alert('Error', 'Password must be at least 6 characters');
       return;
     }
-console.log('meh')
+
     setLoading(true);
     const { error } = await signUp(email, password, fullName);
-    console.log("ji")
     setLoading(false);
 
     if (error) {

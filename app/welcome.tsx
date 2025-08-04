@@ -68,7 +68,7 @@ export default function WelcomeScreen() {
         <View style={styles.buttonSection}>
           <TouchableOpacity
             style={styles.getStartedButton}
-            onPress={() => router.replace('/(tabs)')}
+            onPress={() => router.push('/auth/signup')}
           >
             <Text style={styles.getStartedText}>Get Started</Text>
             <ArrowRight size={20} color="#FF6B9D" />
@@ -76,7 +76,7 @@ export default function WelcomeScreen() {
 
           <TouchableOpacity
             style={styles.loginButton}
-            onPress={() => router.replace('/(tabs)')}
+            onPress={() => router.push('/auth/login')}
           >
             <Text style={styles.loginText}>Login</Text>
           </TouchableOpacity>

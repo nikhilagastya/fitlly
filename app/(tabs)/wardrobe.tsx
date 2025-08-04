@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,77 +14,58 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Heart, Share as share, CreditCard as Edit, ArrowLeft, Filter } from 'lucide-react-native';
 import { router } from 'expo-router';
+import { useAuth } from '@/context/AuthContext';
+import { DatabaseService } from '@/services/database';
+import { Outfit, OutfitItem } from '@/types/database';
 
 export default function WardrobeScreen() {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('All');
-  const [savedLooks, setSavedLooks] = useState([
+  const [savedLooks, setSavedLooks] = useState<Outfit[]>([]);
+  const [likedOutfits, setLikedOutfits] = useState<string[]>([]);
+  const [favoriteOutfits, setFavoriteOutfits] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
 
-    {
-      id: 1,
-      name: 'Casual Day',
-      likes: 24,
-      outfit: {
-        top: 'Pink Crop Top',
-        bottom: 'Blue Jeans',
-        accessory: 'White Sneakers',
-      },
-      image: 'https://images.pexels.com/photos/7679720/pexels-photo-7679720.jpeg?auto=compress&cs=tinysrgb&w=300',
-      date: '2 days ago',
-      liked: true,
-    },
-    {
-      id: 2,
-      name: 'Date Night',
-      likes: 42,
-      outfit: {
-        top: 'Black Top',
-        bottom: 'Dress Pants',
-        accessory: 'Gold Chain',
-      },
-      image: 'https://images.pexels.com/photos/1536619/pexels-photo-1536619.jpeg?auto=compress&cs=tinysrgb&w=300',
-      date: '1 week ago',
-      liked: false,
-    },
-    {
-      id: 3,
-      name: 'Summer Vibes',
-      likes: 18,
-      outfit: {
-        top: 'Floral Top',
-        bottom: 'White Shorts',
-        accessory: 'Sun Hat',
-      },
-      image: 'https://images.pexels.com/photos/1149601/pexels-photo-1149601.jpeg?auto=compress&cs=tinysrgb&w=300',
-      date: '3 days ago',
-      liked: true,
-    },
-    {
-      id: 4,
-      name: 'Office Chic',
-      likes: 31,
-      outfit: {
-        top: 'Blazer',
-        bottom: 'Trousers',
-        accessory: 'Pearl Necklace',
-      },
-      image: 'https://images.pexels.com/photos/1464625/pexels-photo-1464625.jpeg?auto=compress&cs=tinysrgb&w=300',
-      date: '5 days ago',
-      liked: false,
-    },
-  ]);
+  useEffect(() => {
+    if (user) {
+      loadData();
+    }
+  }, [user]);
 
-  const toggleLike = (lookId) => {
-    setSavedLooks(prev => 
-      prev.map(look => 
-        look.id === lookId ? { ...look, liked: !look.liked, likes: look.liked ? look.likes - 1 : look.likes + 1 } : look
-      )
-    );
+  const loadData = async () => {
+    if (!user) return;
+    
+    setLoading(true);
+    try {
+      const [outfits, liked, favorites] = await Promise.all([
+        DatabaseService.getUserOutfits(user.id),
+        DatabaseService.getUserLikedOutfits(user.id),
+        DatabaseService.getUserFavoriteOutfits(user.id),
+      ]);
+      
+      setSavedLooks(outfits);
+      setLikedOutfits(liked);
+      setFavoriteOutfits(favorites);
+    } catch (error) {
+      console.error('Error loading data:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const shareLook = async (look) => {
+  const toggleLike = async (outfitId: string) => {
+    if (!user) return;
+    
+    const success = await DatabaseService.toggleOutfitLike(outfitId, user.id);
+    if (success) {
+      loadData(); // Refresh data to get updated counts
+    }
+  };
+
+  const shareLook = async (outfit: Outfit) => {
     try {
       await Share.share({
-        message: `Check out my ${look.name} look on Fitlly! 👗✨`,
+        message: `Check out my ${outfit.name} look on Fitlly! 👗✨`,
         title: 'My Fitlly Look',
       });
     } catch (error) {
@@ -91,11 +73,33 @@ export default function WardrobeScreen() {
     }
   };
 
-  const editLook = (look) => {
-    Alert.alert('Edit Look', `Edit ${look.name}?`, [
+  const editLook = (outfit: Outfit) => {
+    Alert.alert('Edit Look', `Edit ${outfit.name}?`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Edit', onPress: () => router.push('/mix-match') },
     ]);
+  };
+
+  const deleteLook = async (outfitId: string) => {
+    Alert.alert(
+      'Delete Outfit',
+      'Are you sure you want to delete this outfit?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Delete', 
+          style: 'destructive',
+          onPress: async () => {
+            const success = await DatabaseService.deleteOutfit(outfitId);
+            if (success) {
+              loadData();
+            } else {
+              Alert.alert('Error', 'Failed to delete outfit');
+            }
+          }
+        },
+      ]
+    );
   };
 
   const tabs = ['All', 'Favorites', 'Recent', 'Most Liked'];
@@ -103,15 +107,23 @@ export default function WardrobeScreen() {
   const filteredLooks = savedLooks.filter(look => {
     switch (activeTab) {
       case 'Favorites':
-        return look.liked;
+        return favoriteOutfits.includes(look.id);
       case 'Recent':
         return true; // All are recent for demo
       case 'Most Liked':
-        return look.likes > 25;
+        return look.likes_count > 5;
       default:
         return true;
     }
   });
+
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.centered]}>
+        <Text style={styles.loadingText}>Loading your lookbook...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -137,7 +149,7 @@ export default function WardrobeScreen() {
         >
           <Text style={styles.heroTitle}>Your Style Collection</Text>
           <Text style={styles.heroSubtitle}>
-            {savedLooks.length} saved looks • {savedLooks.filter(l => l.liked).length} favorites
+            {savedLooks.length} saved looks • {favoriteOutfits.length} favorites
           </Text>
         </LinearGradient>
 
@@ -176,7 +188,10 @@ export default function WardrobeScreen() {
           <View style={styles.looksGrid}>
             {filteredLooks.map((look) => (
               <View key={look.id} style={styles.lookCard}>
-                <Image source={{ uri: look.image }} style={styles.lookImage} />
+                <Image 
+                  source={{ uri: 'https://images.pexels.com/photos/7679720/pexels-photo-7679720.jpeg?auto=compress&cs=tinysrgb&w=300' }} 
+                  style={styles.lookImage} 
+                />
                 
                 {/* Overlay */}
                 <LinearGradient
@@ -191,24 +206,25 @@ export default function WardrobeScreen() {
                     <TouchableOpacity onPress={() => toggleLike(look.id)}>
                       <Heart 
                         size={20} 
-                        color={look.liked ? "#FF6B9D" : "white"} 
-                        fill={look.liked ? "#FF6B9D" : "transparent"}
+                        color={likedOutfits.includes(look.id) ? "#FF6B9D" : "white"} 
+                        fill={likedOutfits.includes(look.id) ? "#FF6B9D" : "transparent"}
                       />
                     </TouchableOpacity>
                   </View>
 
                   <View style={styles.outfitDetails}>
-                    <Text style={styles.outfitText}>{look.outfit.top}</Text>
-                    <Text style={styles.outfitText}>{look.outfit.bottom}</Text>
-                    <Text style={styles.outfitText}>{look.outfit.accessory}</Text>
+                    <Text style={styles.outfitText}>{look.description || 'Custom outfit'}</Text>
+                    <Text style={styles.outfitText}>{look.occasion || 'Any occasion'}</Text>
                   </View>
 
                   <View style={styles.cardFooter}>
                     <View style={styles.likesContainer}>
                       <Heart size={16} color="#FF6B9D" fill="#FF6B9D" />
-                      <Text style={styles.likesText}>{look.likes}</Text>
+                      <Text style={styles.likesText}>{look.likes_count}</Text>
                     </View>
-                    <Text style={styles.dateText}>{look.date}</Text>
+                    <Text style={styles.dateText}>
+                      {new Date(look.created_at).toLocaleDateString()}
+                    </Text>
                   </View>
 
                   {/* Action Buttons */}
@@ -231,6 +247,14 @@ export default function WardrobeScreen() {
                 </View>
               </View>
             ))}
+            {filteredLooks.length === 0 && (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyText}>No outfits found</Text>
+                <TouchableOpacity onPress={() => router.push('/mix-match')}>
+                  <Text style={styles.emptyLink}>Create your first look</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </View>
 
@@ -243,11 +267,11 @@ export default function WardrobeScreen() {
               <Text style={styles.statLabel}>Total Looks</Text>
             </View>
             <View style={styles.statCard}>
-              <Text style={styles.statNumber}>{savedLooks.reduce((sum, look) => sum + look.likes, 0)}</Text>
+              <Text style={styles.statNumber}>{savedLooks.reduce((sum, look) => sum + look.likes_count, 0)}</Text>
               <Text style={styles.statLabel}>Total Likes</Text>
             </View>
             <View style={styles.statCard}>
-              <Text style={styles.statNumber}>{savedLooks.filter(l => l.liked).length}</Text>
+              <Text style={styles.statNumber}>{favoriteOutfits.length}</Text>
               <Text style={styles.statLabel}>Favorites</Text>
             </View>
           </View>
@@ -262,6 +286,14 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F8FAFC',
+  },
+  centered: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#6B7280',
   },
   safeArea: {
     flex: 1,
@@ -460,5 +492,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6B7280',
     textAlign: 'center',
+  },
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#6B7280',
+    marginBottom: 8,
+  },
+  emptyLink: {
+    fontSize: 14,
+    color: '#4ECDC4',
+    fontWeight: '600',
   },
 });

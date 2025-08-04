@@ -1,4 +1,5 @@
 import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,8 +13,50 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { User, CreditCard as Edit, Settings, Heart, Share, Bell, Shield, CircleHelp as HelpCircle, LogOut, ChevronRight, Star, Shirt } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { useAuth } from '@/context/AuthContext';
+import { DatabaseService } from '@/services/database';
+import { WardrobeItem, Outfit, StylePreference } from '@/types/database';
 
 export default function ProfileScreen() {
+  const { user, profile, signOut, refreshProfile } = useAuth();
+  const [stats, setStats] = useState({
+    wardrobeItems: 0,
+    savedLooks: 0,
+    totalLikes: 0,
+  });
+  const [stylePreferences, setStylePreferences] = useState<StylePreference[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (user) {
+      loadProfileData();
+    }
+  }, [user]);
+
+  const loadProfileData = async () => {
+    if (!user) return;
+    
+    setLoading(true);
+    try {
+      const [wardrobeItems, outfits, preferences] = await Promise.all([
+        DatabaseService.getWardrobeItems(user.id),
+        DatabaseService.getUserOutfits(user.id),
+        DatabaseService.getStylePreferences(user.id),
+      ]);
+      
+      setStats({
+        wardrobeItems: wardrobeItems.length,
+        savedLooks: outfits.length,
+        totalLikes: outfits.reduce((sum, outfit) => sum + outfit.likes_count, 0),
+      });
+      setStylePreferences(preferences);
+    } catch (error) {
+      console.error('Error loading profile data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleProfileImageUpload = async () => {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -30,8 +73,17 @@ export default function ProfileScreen() {
       });
 
       if (!result.canceled) {
-        Alert.alert('Success', 'Profile picture updated!');
-        // Here you would typically update the profile image in your state/backend
+        // In a real app, you'd upload to Supabase Storage and update the profile
+        const success = await DatabaseService.updateProfile(user!.id, {
+          avatar_url: result.assets[0].uri,
+        });
+        
+        if (success) {
+          Alert.alert('Success', 'Profile picture updated!');
+          refreshProfile();
+        } else {
+          Alert.alert('Error', 'Failed to update profile picture');
+        }
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to update profile picture');
@@ -64,14 +116,11 @@ export default function ProfileScreen() {
     Alert.alert('Log Out', 'Are you sure you want to log out?', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Log Out', style: 'destructive', onPress: () => {
-        // Implement logout logic here
-        Alert.alert('Logged Out', 'You have been logged out successfully');
+        signOut();
       }},
     ]);
   };
 
-  const stylePreferences = ['Casual', 'Trendy', 'Minimalist', 'Vintage'];
-  
   const menuItems = [
     { icon: Edit, title: 'Edit Profile', subtitle: 'Update your information' },
     { icon: Bell, title: 'Notifications', subtitle: 'Manage your alerts' },
@@ -79,6 +128,14 @@ export default function ProfileScreen() {
     { icon: Share, title: 'Share App', subtitle: 'Tell friends about Fitlly' },
     { icon: HelpCircle, title: 'Help & Support', subtitle: 'Get assistance' },
   ];
+
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.centered]}>
+        <Text style={styles.loadingText}>Loading profile...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -104,11 +161,15 @@ export default function ProfileScreen() {
               style={styles.avatarContainer}
               onPress={handleProfileImageUpload}
             >
-              <User size={40} color="white" />
+              {profile?.avatar_url ? (
+                <Image source={{ uri: profile.avatar_url }} style={styles.avatarImage} />
+              ) : (
+                <User size={40} color="white" />
+              )}
             </TouchableOpacity>
             <View style={styles.userInfo}>
-              <Text style={styles.userName}>Sarah Johnson</Text>
-              <Text style={styles.userEmail}>sarah.j@email.com</Text>
+              <Text style={styles.userName}>{profile?.full_name || 'User'}</Text>
+              <Text style={styles.userEmail}>{profile?.email || user?.email}</Text>
               <View style={styles.memberBadge}>
                 <Star size={14} color="#FBBF24" fill="#FBBF24" />
                 <Text style={styles.memberText}>Premium Member</Text>
@@ -130,21 +191,21 @@ export default function ProfileScreen() {
             <View style={styles.statIcon}>
               <Shirt size={24} color="#FF6B9D" />
             </View>
-            <Text style={styles.statNumber}>47</Text>
+            <Text style={styles.statNumber}>{stats.wardrobeItems}</Text>
             <Text style={styles.statLabel}>Wardrobe Items</Text>
           </View>
           <View style={styles.statCard}>
             <View style={styles.statIcon}>
               <Heart size={24} color="#10B981" />
             </View>
-            <Text style={styles.statNumber}>23</Text>
+            <Text style={styles.statNumber}>{stats.savedLooks}</Text>
             <Text style={styles.statLabel}>Saved Looks</Text>
           </View>
           <View style={styles.statCard}>
             <View style={styles.statIcon}>
               <Star size={24} color="#FBBF24" />
             </View>
-            <Text style={styles.statNumber}>156</Text>
+            <Text style={styles.statNumber}>{stats.totalLikes}</Text>
             <Text style={styles.statLabel}>Total Likes</Text>
           </View>
         </View>
@@ -153,11 +214,14 @@ export default function ProfileScreen() {
         <View style={styles.preferencesSection}>
           <Text style={styles.sectionTitle}>Style Preferences</Text>
           <View style={styles.preferencesGrid}>
-            {stylePreferences.map((style, index) => (
-              <View key={index} style={styles.preferenceTag}>
-                <Text style={styles.preferenceText}>{style}</Text>
+            {stylePreferences.map((preference) => (
+              <View key={preference.id} style={styles.preferenceTag}>
+                <Text style={styles.preferenceText}>{preference.preference_name}</Text>
               </View>
             ))}
+            {stylePreferences.length === 0 && (
+              <Text style={styles.emptyPreferences}>No style preferences set</Text>
+            )}
           </View>
         </View>
 
@@ -216,6 +280,14 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F8FAFC',
   },
+  centered: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#6B7280',
+  },
   safeArea: {
     flex: 1,
   },
@@ -254,6 +326,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 16,
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
   },
   userInfo: {
     flex: 1,
@@ -368,6 +445,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#667EEA',
     fontWeight: '600',
+  },
+  emptyPreferences: {
+    fontSize: 14,
+    color: '#9CA3AF',
+    fontStyle: 'italic',
   },
   menuSection: {
     paddingHorizontal: 20,
