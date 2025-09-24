@@ -16,6 +16,7 @@ import { router } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '@/context/AuthContext';
 import { DatabaseService } from '@/services/database';
+import { uploadImageFromUri } from '@/services/storage';
 import { WardrobeItem } from '@/types/database';
 
 export default function UploadScreen() {
@@ -41,11 +42,16 @@ export default function UploadScreen() {
     }
   };
 
-  const uploadImageToSupabase = async (uri: string): Promise<string | null> => {
+  const uploadImageToSupabase = async (uri: string): Promise<{ publicUrl: string; path: string } | null> => {
+    if (!user) return null;
     try {
-      // For demo purposes, we'll use the original URI
-      // In a real app, you'd upload to Supabase Storage
-      return uri;
+      const { publicUrl, path } = await uploadImageFromUri({
+        uri,
+        bucket: 'wardrobe',
+        userId: user.id,
+        folder: 'items',
+      });
+      return { publicUrl, path };
     } catch (error) {
       console.error('Error uploading image:', error);
       return null;
@@ -57,8 +63,8 @@ export default function UploadScreen() {
 
     setLoading(true);
     try {
-      const imageUrl = await uploadImageToSupabase(imageUri);
-      if (!imageUrl) {
+      const uploaded = await uploadImageToSupabase(imageUri);
+      if (!uploaded) {
         Alert.alert('Error', 'Failed to upload image');
         return;
       }
@@ -70,8 +76,8 @@ export default function UploadScreen() {
         subcategory: '',
         color: '',
         brand: '',
-        image_url: imageUrl,
-        image_path: '',
+        image_url: uploaded.publicUrl,
+        image_path: uploaded.path,
         tags: [],
         is_favorite: false,
       };

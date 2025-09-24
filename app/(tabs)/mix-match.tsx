@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,13 +9,16 @@ import {
   ScrollView,
   Image,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Shuffle, Save, ArrowLeft, User, Heart } from 'lucide-react-native';
+import { Shuffle, Save, ArrowLeft, User, Heart, Image as ImageIcon } from 'lucide-react-native';
 import { router } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '@/context/AuthContext';
 import { DatabaseService } from '@/services/database';
 import { WardrobeItem } from '@/types/database';
+import { generateOutfitImage } from '@/services/ai';
 
 export default function MixMatchScreen() {
   const { user } = useAuth();
@@ -44,12 +47,21 @@ export default function MixMatchScreen() {
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) {
       loadWardrobeItems();
     }
   }, [user]);
+
+  // Refresh items whenever the screen gains focus (e.g., after uploading new items)
+  useFocusEffect(
+    useCallback(() => {
+      if (user) loadWardrobeItems();
+    }, [user])
+  );
 
   const loadWardrobeItems = async () => {
     if (!user) return;
@@ -65,6 +77,15 @@ export default function MixMatchScreen() {
       ]);
       
       setWardrobeItems({ tops, bottoms, accessories, shoes, outerwear });
+      // Debug: verify we have valid image URLs
+      console.log('[MixMatch] loaded', {
+        tops: tops.length,
+        bottoms: bottoms.length,
+        accessories: accessories.length,
+        sampleTop: tops[0]?.image_url,
+        sampleBottom: bottoms[0]?.image_url,
+        sampleAccessory: accessories[0]?.image_url,
+      })
       
       // Auto-select first items if available
       if (tops.length > 0 && !selectedOutfit.top) {
@@ -117,6 +138,7 @@ export default function MixMatchScreen() {
         occasion: '',
         season: '',
         is_public: false,
+        preview_image_url: generatedImageUrl || undefined,
       });
 
       if (!outfit) {
@@ -158,6 +180,28 @@ export default function MixMatchScreen() {
       Alert.alert('Error', 'Failed to save outfit');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const generatePreview = async () => {
+    if (!selectedOutfit.top && !selectedOutfit.bottom && !selectedOutfit.accessory) {
+      Alert.alert('Add Items', 'Select at least one item to generate a preview.');
+      return;
+    }
+    setGenerating(true);
+    setGeneratedImageUrl(null);
+    try {
+      const url = await generateOutfitImage({
+        top: selectedOutfit.top || undefined,
+        bottom: selectedOutfit.bottom || undefined,
+        accessory: selectedOutfit.accessory || undefined,
+      }, user?.id);
+      setGeneratedImageUrl(url);
+    } catch (e: any) {
+      console.error('Generate preview error', e);
+      Alert.alert('Preview Failed', e?.message || 'Could not generate preview');
+    } finally {
+      setGenerating(false);
     }
   };
 
@@ -260,7 +304,32 @@ export default function MixMatchScreen() {
               {saving ? 'Saving...' : 'Save Look'}
             </Text>
           </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.saveButton, generating && styles.disabledButton]} 
+            onPress={generatePreview}
+            disabled={generating}
+          >
+            <ImageIcon size={20} color="#A855F7" />
+            <Text style={[styles.saveText, { color: '#A855F7' }]}>
+              {generating ? 'Generating...' : 'Generate Preview'}
+            </Text>
+          </TouchableOpacity>
         </View>
+
+        {/* Generated Preview */}
+        {(generating || generatedImageUrl) && (
+          <View style={{ paddingHorizontal: 20, marginBottom: 24 }}>
+            <Text style={styles.sectionTitle}>AI Preview</Text>
+            {generating ? (
+              <View style={{ height: 280, borderRadius: 16, backgroundColor: '#E5E7EB', alignItems: 'center', justifyContent: 'center' }}>
+                <ActivityIndicator size="large" color="#A855F7" />
+                <Text style={{ marginTop: 8, color: '#6B7280' }}>Generating preview...</Text>
+              </View>
+            ) : (
+              <Image source={{ uri: generatedImageUrl! }} style={{ width: '100%', height: 280, borderRadius: 16, backgroundColor: '#E5E7EB' }} />
+            )}
+          </View>
+        )}
 
         {/* Wardrobe Categories */}
         <View style={styles.wardrobeSection}>

@@ -15,6 +15,7 @@ import { User, CreditCard as Edit, Settings, Heart, Share, Bell, Shield, CircleH
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '@/context/AuthContext';
 import { DatabaseService } from '@/services/database';
+import { uploadImageFromUri } from '@/services/storage';
 import { WardrobeItem, Outfit, StylePreference } from '@/types/database';
 
 export default function ProfileScreen() {
@@ -72,17 +73,29 @@ export default function ProfileScreen() {
         quality: 1,
       });
 
-      if (!result.canceled) {
-        // In a real app, you'd upload to Supabase Storage and update the profile
-        const success = await DatabaseService.updateProfile(user!.id, {
-          avatar_url: result.assets[0].uri,
-        });
-        
-        if (success) {
-          Alert.alert('Success', 'Profile picture updated!');
-          refreshProfile();
-        } else {
-          Alert.alert('Error', 'Failed to update profile picture');
+      if (!result.canceled && user) {
+        // Upload avatar to storage and update profile with the public URL
+        const asset = result.assets[0]
+        try {
+          const { publicUrl } = await uploadImageFromUri({
+            uri: asset.uri,
+            bucket: 'wardrobe',
+            userId: user.id,
+            // Fixed path so new uploads overwrite prior avatar
+            pathOverride: `${user.id}/avatars/avatar.jpg`,
+            upsert: true,
+          })
+          const success = await DatabaseService.updateProfile(user.id, {
+            avatar_url: publicUrl,
+          })
+          if (success) {
+            Alert.alert('Success', 'Profile picture updated!')
+            refreshProfile()
+          } else {
+            Alert.alert('Error', 'Failed to update profile picture')
+          }
+        } catch (e) {
+          Alert.alert('Error', 'Failed to upload profile picture')
         }
       }
     } catch (error) {

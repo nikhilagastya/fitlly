@@ -1,4 +1,5 @@
 import { supabase } from '@/supabse/Supabase';
+import { removeFile } from '@/services/storage';
 import { WardrobeItem, Outfit, OutfitItem, Profile, StylePreference } from '@/types/database';
 
 export class DatabaseService {
@@ -66,6 +67,13 @@ export class DatabaseService {
   }
 
   static async deleteWardrobeItem(itemId: string): Promise<boolean> {
+    // Try to fetch image_path to clean up storage
+    const { data: itemToDelete } = await supabase
+      .from('wardrobe_items')
+      .select('image_path')
+      .eq('id', itemId)
+      .single();
+
     const { error } = await supabase
       .from('wardrobe_items')
       .delete()
@@ -74,6 +82,14 @@ export class DatabaseService {
     if (error) {
       console.error('Error deleting wardrobe item:', error);
       return false;
+    }
+    // best-effort storage cleanup (ignore errors)
+    try {
+      if (itemToDelete?.image_path) {
+        await removeFile('wardrobe', itemToDelete.image_path);
+      }
+    } catch (e) {
+      // no-op
     }
     return true;
   }

@@ -32,6 +32,7 @@ export interface Outfit {
   occasion: string;
   season: string;
   is_public: boolean;
+  preview_image_url?: string;
   likes_count: number;
   favorites_count: number;
   created_at: string;

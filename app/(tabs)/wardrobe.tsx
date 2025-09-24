@@ -24,6 +24,7 @@ export default function WardrobeScreen() {
   const [savedLooks, setSavedLooks] = useState<Outfit[]>([]);
   const [likedOutfits, setLikedOutfits] = useState<string[]>([]);
   const [favoriteOutfits, setFavoriteOutfits] = useState<string[]>([]);
+  const [outfitPreviews, setOutfitPreviews] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -46,6 +47,19 @@ export default function WardrobeScreen() {
       setSavedLooks(outfits);
       setLikedOutfits(liked);
       setFavoriteOutfits(favorites);
+
+      // Load one preview image per outfit (first item image if available)
+      const previews: Record<string, string> = {};
+      await Promise.all(
+        outfits.map(async (o) => {
+          try {
+            const items = await DatabaseService.getOutfitItems(o.id);
+            const first = items?.[0]?.wardrobe_item;
+            if (first?.image_url) previews[o.id] = first.image_url;
+          } catch {}
+        })
+      );
+      setOutfitPreviews(previews);
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
@@ -189,7 +203,7 @@ export default function WardrobeScreen() {
             {filteredLooks.map((look) => (
               <View key={look.id} style={styles.lookCard}>
                 <Image 
-                  source={{ uri: 'https://images.pexels.com/photos/7679720/pexels-photo-7679720.jpeg?auto=compress&cs=tinysrgb&w=300' }} 
+                  source={{ uri: look.preview_image_url || outfitPreviews[look.id] || 'https://images.pexels.com/photos/7679720/pexels-photo-7679720.jpeg?auto=compress&cs=tinysrgb&w=300' }} 
                   style={styles.lookImage} 
                 />
                 
